@@ -21,7 +21,10 @@
 #  account_id             :bigint(8)        not null
 #  application_id         :bigint(8)
 #  in_reply_to_account_id :bigint(8)
+#  local_only             :boolean
+#  full_status_text       :text             default(""), not null
 #  poll_id                :bigint(8)
+#  content_type           :string
 #  deleted_at             :datetime
 #
 
@@ -74,6 +77,7 @@ class Status < ApplicationRecord
   validates_with DisallowedHashtagsValidator
   validates :reblog, uniqueness: { scope: :account }, if: :reblog?
   validates :visibility, exclusion: { in: %w(direct limited) }, if: :reblog?
+  validates :content_type, inclusion: { in: %w(text/plain text/markdown text/html) }, allow_nil: true
 
   accepts_nested_attributes_for :poll
 
@@ -102,6 +106,8 @@ class Status < ApplicationRecord
             .where("t#{id}.tag_id IS NULL")
     end
   }
+
+  scope :not_local_only, -> { where(local_only: [false, nil]) }
 
   cache_associated :application,
                    :media_attachments,
@@ -266,6 +272,8 @@ class Status < ApplicationRecord
 
   around_create Mastodon::Snowflake::Callbacks
 
+  before_create :set_locality
+
   before_validation :prepare_contents, if: :local?
   before_validation :set_reblog
   before_validation :set_visibility
@@ -283,8 +291,50 @@ class Status < ApplicationRecord
       where(language: nil).or where(language: account.chosen_languages)
     end
 
+    def as_direct_timeline(account, limit = 20, max_id = nil, since_id = nil, cache_ids = false)
+      # direct timeline is mix of direct message from_me and to_me.
+      # 2 queries are executed with pagination.
+      # constant expression using arel_table is required for partial index
+
+      # _from_me part does not require any timeline filters
+      query_from_me = where(account_id: account.id)
+                      .where(Status.arel_table[:visibility].eq(3))
+                      .limit(limit)
+                      .order('statuses.id DESC')
+
+      # _to_me part requires mute and block filter.
+      # FIXME: may we check mutes.hide_notifications?
+      query_to_me = Status
+                    .joins(:mentions)
+                    .merge(Mention.where(account_id: account.id))
+                    .where(Status.arel_table[:visibility].eq(3))
+                    .limit(limit)
+                    .order('mentions.status_id DESC')
+                    .not_excluded_by_account(account)
+
+      if max_id.present?
+        query_from_me = query_from_me.where('statuses.id < ?', max_id)
+        query_to_me = query_to_me.where('mentions.status_id < ?', max_id)
+      end
+
+      if since_id.present?
+        query_from_me = query_from_me.where('statuses.id > ?', since_id)
+        query_to_me = query_to_me.where('mentions.status_id > ?', since_id)
+      end
+
+      if cache_ids
+        # returns array of cache_ids object that have id and updated_at
+        (query_from_me.cache_ids.to_a + query_to_me.cache_ids.to_a).uniq(&:id).sort_by(&:id).reverse.take(limit)
+      else
+        # returns ActiveRecord.Relation
+        items = (query_from_me.select(:id).to_a + query_to_me.select(:id).to_a).uniq(&:id).sort_by(&:id).reverse.take(limit)
+        Status.where(id: items.map(&:id))
+      end
+    end
+
     def as_public_timeline(account = nil, local_only = false)
-      query = timeline_scope(local_only).without_replies
+      query = timeline_scope(local_only)
+      query = query.without_replies unless Setting.show_replies_in_public_timelines
 
       apply_timeline_filters(query, account, local_only)
     end
@@ -343,7 +393,7 @@ class Status < ApplicationRecord
       visibility = [:public, :unlisted]
 
       if account.nil?
-        where(visibility: visibility)
+        where(visibility: visibility).not_local_only
       elsif target_account.blocking?(account) # get rid of blocked peeps
         none
       elsif account.id == target_account.id # author can see own stuff
@@ -365,9 +415,12 @@ class Status < ApplicationRecord
 
     def timeline_scope(local_only = false)
       starting_scope = local_only ? Status.local : Status
-      starting_scope
-        .with_public_visibility
-        .without_reblogs
+      starting_scope = starting_scope.with_public_visibility
+      if Setting.show_reblogs_in_public_timelines
+        starting_scope
+      else
+        starting_scope.without_reblogs
+      end
     end
 
     def apply_timeline_filters(query, account, local_only)
@@ -386,7 +439,7 @@ class Status < ApplicationRecord
     end
 
     def filter_timeline_default(query)
-      query.excluding_silenced_accounts
+      query.not_local_only.excluding_silenced_accounts
     end
 
     def account_silencing_filter(account)
@@ -397,6 +450,15 @@ class Status < ApplicationRecord
         excluding_silenced_accounts
       end
     end
+  end
+
+  def marked_local_only?
+    # match both with and without U+FE0F (the emoji variation selector)
+    /#{local_only_emoji}\ufe0f?\z/.match?(content)
+  end
+
+  def local_only_emoji
+    '👁'
   end
 
   def status_stat
@@ -432,6 +494,12 @@ class Status < ApplicationRecord
     self.visibility = reblog.visibility if reblog? && visibility.nil?
     self.visibility = (account.locked? ? :private : :public) if visibility.nil?
     self.sensitive  = false if sensitive.nil?
+  end
+
+  def set_locality
+    if account.domain.nil? && !attribute_changed?(:local_only)
+      self.local_only = marked_local_only?
+    end
   end
 
   def set_conversation

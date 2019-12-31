@@ -59,6 +59,7 @@ ignore_unused:
   - 'errors.429'
   - 'admin.accounts.roles.*'
   - 'admin.action_logs.actions.*'
+  - 'themes.*'
   - 'statuses.attached.*'
 
 ignore_inconsistent_interpolations:

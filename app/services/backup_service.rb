@@ -151,7 +151,8 @@ class BackupService < BaseService
     ActiveModelSerializers::SerializableResource.new(
       object,
       serializer: serializer,
-      adapter: ActivityPub::Adapter
+      adapter: ActivityPub::Adapter,
+      allow_local_only: true,
     ).as_json
   end
 

@@ -52,6 +52,7 @@ gem 'goldfinger', '~> 2.1'
 gem 'hiredis', '~> 0.6'
 gem 'redis-namespace', '~> 1.7'
 gem 'health_check', git: 'https://github.com/ianheggie/health_check', ref: '0b799ead604f900ed50685e9b2d469cd2befba5b'
+gem 'html2text'
 gem 'htmlentities', '~> 4.3'
 gem 'http', '~> 3.3'
 gem 'http_accept_language', '~> 2.1'
@@ -100,6 +101,8 @@ gem 'webpush'
 gem 'json-ld', git: 'https://github.com/ruby-rdf/json-ld.git', ref: 'e742697a0906e74e8bb777ef98137bc3955d981d'
 gem 'json-ld-preloaded', '~> 3.0'
 gem 'rdf-normalize', '~> 0.3'
+
+gem 'redcarpet', '~> 3.4'
 
 group :development, :test do
   gem 'fabrication', '~> 2.21'

@@ -8,6 +8,7 @@ class Auth::SessionsController < Devise::SessionsController
   skip_before_action :require_no_authentication, only: [:create]
   skip_before_action :require_functional!
 
+  prepend_before_action :set_pack
   prepend_before_action :authenticate_with_two_factor, if: :two_factor_enabled?, only: [:create]
 
   before_action :set_instance_presenter, only: [:new]
@@ -107,11 +108,16 @@ class Auth::SessionsController < Devise::SessionsController
 
   def prompt_for_two_factor(user)
     session[:otp_user_id] = user.id
+    use_pack 'auth'
     @body_classes = 'lighter'
     render :two_factor
   end
 
   private
+
+  def set_pack
+    use_pack 'auth'
+  end
 
   def set_instance_presenter
     @instance_presenter = InstancePresenter.new

@@ -136,6 +136,8 @@ Rails.application.routes.draw do
       end
     end
 
+    resources :flavours, only: [:index, :show, :update], param: :flavour
+
     resource :delete, only: [:show, :destroy]
     resource :migration, only: [:show, :create]
 
@@ -305,6 +307,7 @@ Rails.application.routes.draw do
       end
 
       namespace :timelines do
+        resource :direct, only: :show, controller: :direct
         resource :home, only: :show, controller: :home
         resource :public, only: :show, controller: :public
         resources :tag, only: :show
@@ -325,7 +328,11 @@ Rails.application.routes.draw do
 
       resources :media,        only: [:create, :update]
       resources :blocks,       only: [:index]
-      resources :mutes,        only: [:index]
+      resources :mutes,        only: [:index] do
+        collection do
+          get 'details'
+        end
+      end
       resources :favourites,   only: [:index]
       resources :bookmarks,    only: [:index]
       resources :reports,      only: [:create]
@@ -355,9 +362,10 @@ Rails.application.routes.draw do
         end
       end
 
-      resources :notifications, only: [:index, :show] do
+      resources :notifications, only: [:index, :show, :destroy] do
         collection do
           post :clear
+          delete :destroy_multiple
         end
 
         member do
